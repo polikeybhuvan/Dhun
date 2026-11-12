@@ -334,6 +334,12 @@ class PlayerService : Service(), Player.Listener, PlaybackStatsListener.Callback
         maybeNormalizeVolume()
         maybeProcessRadio()
 
+        // Save each track as soon as it becomes active so Songs refreshes immediately,
+        // without waiting for playback statistics at the end.
+        mediaItem?.let { activeMediaItem ->
+            query { Database.insert(activeMediaItem) }
+        }
+
         if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO || reason == Player.MEDIA_ITEM_TRANSITION_REASON_SEEK) {
             updateMediaSessionQueue(player.currentTimeline)
         }
@@ -898,12 +904,44 @@ class PlayerService : Service(), Player.Listener, PlaybackStatsListener.Callback
             coroutineScope.launch(Dispatchers.IO) {
                 try {
                     val videoId = mediaItem.mediaId
-                    val response = Innertube.player(PlayerBody(videoId = videoId))?.getOrThrow()
+                    val playerBody = PlayerBody(videoId = videoId)
+                    val firstResponse = Innertube.player(playerBody)
+                    val responseResult = if (
+                        firstResponse?.getOrNull()?.playabilityStatus?.status == "LOGIN_REQUIRED"
+                    ) {
+                        delay(500)
+                        Innertube.player(playerBody)
+                    } else {
+                        firstResponse
+                    }
+                    val response = responseResult?.getOrThrow()
                         ?: error("Unable to load song stream")
+                    if (response.videoDetails?.videoId?.let { it != videoId } == true) {
+                        error("The returned video id doesn't match the requested one")
+                    }
                     val format = response.streamingData?.highestQualityFormat
                         ?: error("No downloadable audio format was found")
                     val url = format.url ?: error("The audio stream URL is unavailable")
-                    val contentLength = format.contentLength ?: C.LENGTH_UNSET.toLong()
+
+                    val dataSpec = DataSpec.Builder()
+                        .setUri(url)
+                        .setKey(videoId)
+                        // Stream metadata can report a stale or truncated length. Read to EOF,
+                        // then record the number of bytes that actually reached the cache.
+                        .setLength(C.LENGTH_UNSET.toLong())
+                        .build()
+                    val downloadDataSource = CacheDataSource.Factory()
+                        .setCache(cache)
+                        .setUpstreamDataSourceFactory(DefaultHttpDataSource.Factory()
+                            .setConnectTimeoutMs(16000)
+                            .setReadTimeoutMs(30000)
+                            .setUserAgent("Mozilla/5.0 (Windows NT 10.0; rv:91.0) Gecko/20100101 Firefox/91.0"))
+                        .createDataSource()
+                    CacheWriter(downloadDataSource, dataSpec, null, null).cache()
+                    val cachedLength = cache.getCachedLength(videoId, 0, Long.MAX_VALUE)
+                        .takeIf { it > 0 }
+                        ?: format.contentLength?.takeIf { it > 0 }
+                        ?: error("The downloaded audio could not be verified in offline storage")
 
                     query {
                         Database.insert(mediaItem)
@@ -913,26 +951,12 @@ class PlayerService : Service(), Player.Listener, PlaybackStatsListener.Callback
                                 itag = format.itag,
                                 mimeType = format.mimeType,
                                 bitrate = format.bitrate,
-                                contentLength = format.contentLength,
+                                contentLength = cachedLength,
                                 lastModified = format.lastModified,
                                 loudnessDb = response.playerConfig?.audioConfig?.normalizedLoudnessDb
                             )
                         )
                     }
-
-                    val dataSpec = DataSpec.Builder()
-                        .setUri(url)
-                        .setKey(videoId)
-                        .setLength(contentLength)
-                        .build()
-                    val downloadDataSource = CacheDataSource.Factory()
-                        .setCache(cache)
-                        .setUpstreamDataSourceFactory(DefaultHttpDataSource.Factory()
-                            .setConnectTimeoutMs(16000)
-                            .setReadTimeoutMs(8000)
-                            .setUserAgent("Mozilla/5.0 (Windows NT 10.0; rv:91.0) Gecko/20100101 Firefox/91.0"))
-                        .createDataSource()
-                    CacheWriter(downloadDataSource, dataSpec, null, null).cache()
                     withContext(Dispatchers.Main) {
                         android.widget.Toast.makeText(this@PlayerService, "Saved for offline listening", android.widget.Toast.LENGTH_SHORT).show()
                     }

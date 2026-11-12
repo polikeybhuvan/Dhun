@@ -11,8 +11,8 @@ android {
         applicationId = "it.dhun.music"
         minSdk = 21
         targetSdk = 33
-        versionCode = 21
-        versionName = "1.0.0"
+        versionCode = 22
+        versionName = "1.0.1"
     }
 
     splits {
