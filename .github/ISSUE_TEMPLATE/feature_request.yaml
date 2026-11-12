@@ -1,0 +1,28 @@
+name: Feature request
+description: Suggest an idea for Dhun
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Share a focused idea that could improve Dhun. Please search existing issues first.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe the need or frustration behind the idea.
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: What would you like to happen?
+      description: Describe the behavior or feature you have in mind.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Other ideas you considered
+    validations:
+      required: false

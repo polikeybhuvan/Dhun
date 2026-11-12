@@ -1,0 +1,16 @@
+Har gaane mein ek kahaani.
+
+Dhun is an independent, open-source Android music player maintained by @polikeybhuvan.
+
+<b>Features:</b>
+
+* Search for songs and artists
+* Stream music with background playback
+* Save tracks for offline listening
+* Create and manage playlists
+* Browse recently played songs
+* View artist pages and lyrics when available
+* Light and dark themes
+* Playback speed controls, sleep timer, and queue management
+
+Dhun is an independent fork of ViMusic. It retains the original GPL-3.0 license and attribution. YouTube and related marks belong to their respective owners; this project is not affiliated with or endorsed by YouTube or Google.

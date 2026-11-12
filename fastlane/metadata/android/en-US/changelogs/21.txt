@@ -1,0 +1,4 @@
+Dhun 1.0.0
+- First public Dhun release
+- Updated music discovery, playback, offline listening, themes, and branding
+- Added the Dhun tagline: Har gaane mein ek kahaani.
