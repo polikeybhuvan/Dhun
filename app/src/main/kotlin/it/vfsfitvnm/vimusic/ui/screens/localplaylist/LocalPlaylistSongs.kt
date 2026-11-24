@@ -1,5 +1,7 @@
 package it.vfsfitvnm.vimusic.ui.screens.localplaylist
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.ExperimentalAnimationApi
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -61,6 +63,7 @@ import it.vfsfitvnm.vimusic.utils.completed
 import it.vfsfitvnm.vimusic.utils.enqueue
 import it.vfsfitvnm.vimusic.utils.forcePlayAtIndex
 import it.vfsfitvnm.vimusic.utils.forcePlayFromBeginning
+import it.vfsfitvnm.vimusic.utils.toast
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.runBlocking
@@ -74,6 +77,7 @@ fun LocalPlaylistSongs(
     onDelete: () -> Unit,
 ) {
     val (colorPalette) = LocalAppearance.current
+    val context = androidx.compose.ui.platform.LocalContext.current
     val binder = LocalPlayerServiceBinder.current
     val menuState = LocalMenuState.current
 
@@ -81,6 +85,29 @@ fun LocalPlaylistSongs(
 
     LaunchedEffect(Unit) {
         Database.playlistWithSongs(playlistId).filterNotNull().collect { playlistWithSongs = it }
+    }
+
+    val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("audio/x-mpegurl")) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val current = playlistWithSongs ?: return@rememberLauncherForActivityResult
+        query {
+            runCatching {
+                val content = buildString {
+                    appendLine("#EXTM3U")
+                    appendLine("#PLAYLIST:${current.playlist.name.replace('\n', ' ')}")
+                    current.songs.forEach { song ->
+                        appendLine("#EXTINF:-1,${song.artistsText.orEmpty()} - ${song.title}".replace('\n', ' '))
+                        appendLine("https://music.youtube.com/watch?v=${song.id}")
+                    }
+                }
+                context.contentResolver.openOutputStream(uri)?.bufferedWriter()?.use { it.write(content) }
+                    ?: error("Unable to write playlist file")
+                android.os.Handler(android.os.Looper.getMainLooper()).post { context.toast("Playlist exported") }
+            }.onFailure {
+                val message = "Playlist export failed: ${it.message ?: "write error"}"
+                android.os.Handler(android.os.Looper.getMainLooper()).post { context.toast(message) }
+            }
+        }
     }
 
     val lazyListState = rememberLazyListState()
@@ -207,6 +234,17 @@ fun LocalPlaylistSongs(
                                             }
                                         )
                                     }
+
+                                    MenuEntry(
+                                        icon = R.drawable.share_social,
+                                        text = "Export M3U",
+                                        onClick = {
+                                            menuState.hide()
+                                            val fileName = (playlistWithSongs?.playlist?.name ?: "Dhun playlist")
+                                                .replace(Regex("[^A-Za-z0-9 _-]"), "").take(60).ifBlank { "Dhun playlist" }
+                                            exportLauncher.launch("$fileName.m3u")
+                                        }
+                                    )
 
                                     MenuEntry(
                                         icon = R.drawable.pencil,

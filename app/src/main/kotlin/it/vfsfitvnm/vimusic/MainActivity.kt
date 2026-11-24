@@ -304,23 +304,33 @@ class MainActivity : ComponentActivity(), PersistMapOwner {
 
         val uri = intent?.data ?: return
 
+        val host = uri.host?.lowercase() ?: return
+        val allowedHosts = setOf("youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be")
+        if (uri.scheme != "https" || host !in allowedHosts || (uri.port != -1 && uri.port != 443)) return
+
+        val pathSegments = uri.pathSegments
+        val channelId = if (host != "youtu.be" && pathSegments.size == 2 && pathSegments[0] in setOf("channel", "c")) {
+            pathSegments[1].takeIf { it.matches(Regex("[A-Za-z0-9_-]{1,100}")) }
+        } else null
+        val videoId = when {
+            host == "youtu.be" && pathSegments.size == 1 -> pathSegments.single()
+            host != "youtu.be" && pathSegments == listOf("watch") -> uri.getQueryParameter("v")
+            else -> null
+        }?.takeIf { it.matches(Regex("[A-Za-z0-9_-]{11}")) }
+
+        if (channelId == null && videoId == null) return
+
         intent.data = null
         this.intent = null
 
         Toast.makeText(this, "Opening url...", Toast.LENGTH_SHORT).show()
 
         lifecycleScope.launch(Dispatchers.IO) {
-            when (val path = uri.pathSegments.firstOrNull()) {
-                "channel", "c" -> uri.lastPathSegment?.let { channelId ->
-                    artistRoute.ensureGlobal(channelId)
-                }
-
-                else -> when {
-                    path == "watch" -> uri.getQueryParameter("v")
-                    uri.host == "youtu.be" -> path
-                    else -> null
-                }?.let { videoId ->
-                    Innertube.song(videoId)?.getOrNull()?.let { song ->
+            if (channelId != null) {
+                artistRoute.ensureGlobal(channelId)
+            } else {
+                videoId?.let { id ->
+                    Innertube.song(id)?.getOrNull()?.let { song ->
                         val binder = snapshotFlow { binder }.filterNotNull().first()
                         withContext(Dispatchers.Main) {
                             binder.player.forcePlay(song.asMediaItem)

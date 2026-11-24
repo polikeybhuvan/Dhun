@@ -1,6 +1,8 @@
 package it.vfsfitvnm.vimusic.ui.screens.home
 
 import androidx.compose.animation.ExperimentalAnimationApi
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -26,8 +28,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import android.net.Uri
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 import it.vfsfitvnm.compose.persist.persistList
@@ -39,6 +43,7 @@ import it.vfsfitvnm.vimusic.enums.PlaylistSortBy
 import it.vfsfitvnm.vimusic.enums.SortOrder
 import it.vfsfitvnm.vimusic.models.Playlist
 import it.vfsfitvnm.vimusic.models.PlaylistPreview
+import it.vfsfitvnm.vimusic.models.SongPlaylistMap
 import it.vfsfitvnm.vimusic.query
 import it.vfsfitvnm.vimusic.ui.components.themed.FloatingActionsContainerWithScrollToTop
 import it.vfsfitvnm.vimusic.ui.components.themed.Header
@@ -52,6 +57,20 @@ import it.vfsfitvnm.vimusic.ui.styling.px
 import it.vfsfitvnm.vimusic.utils.playlistSortByKey
 import it.vfsfitvnm.vimusic.utils.playlistSortOrderKey
 import it.vfsfitvnm.vimusic.utils.rememberPreference
+import it.vfsfitvnm.vimusic.utils.toast
+
+private fun youtubeVideoId(line: String): String? = runCatching {
+    val uri = Uri.parse(line.trim())
+    if (uri.scheme != "https") return@runCatching null
+    val host = uri.host?.lowercase() ?: return@runCatching null
+    val candidate = when {
+        host == "youtu.be" && uri.pathSegments.size == 1 -> uri.lastPathSegment
+        host == "youtube.com" || host == "www.youtube.com" || host == "music.youtube.com" ->
+            if (uri.path == "/watch") uri.getQueryParameter("v") else null
+        else -> null
+    }
+    candidate?.takeIf { it.matches(Regex("[A-Za-z0-9_-]{11}")) }
+}.getOrNull()
 
 @ExperimentalAnimationApi
 @ExperimentalFoundationApi
@@ -62,6 +81,32 @@ fun HomePlaylists(
     onSearchClick: () -> Unit,
 ) {
     val (colorPalette) = LocalAppearance.current
+    val context = LocalContext.current
+
+    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        query {
+            runCatching {
+                val text = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                    ?: error("Unable to read playlist file")
+                require(text.length <= 2 * 1024 * 1024) { "Playlist file is too large" }
+                val ids = text.lineSequence().mapNotNull(::youtubeVideoId).distinct().take(500).toList()
+                val songs = ids.mapNotNull(Database::songOnce)
+                if (songs.isEmpty()) error("No tracks from this playlist are in your library")
+                val name = text.lineSequence().firstOrNull { it.startsWith("#PLAYLIST:") }
+                    ?.removePrefix("#PLAYLIST:")?.trim()?.take(80)?.takeIf(String::isNotBlank)
+                    ?: "Imported playlist"
+                val id = Database.insert(Playlist(name = name))
+                if (id > 0) Database.insertSongPlaylistMaps(
+                    songs.mapIndexed { index, song -> SongPlaylistMap(songId = song.id, playlistId = id, position = index) }
+                )
+                android.os.Handler(android.os.Looper.getMainLooper()).post { context.toast("Imported ${songs.size} tracks") }
+            }.onFailure {
+                val message = "Playlist import failed: ${it.message ?: "invalid file"}"
+                android.os.Handler(android.os.Looper.getMainLooper()).post { context.toast(message) }
+            }
+        }
+    }
 
     var isCreatingANewPlaylist by rememberSaveable {
         mutableStateOf(false)
@@ -120,6 +165,14 @@ fun HomePlaylists(
                     SecondaryTextButton(
                         text = "New playlist",
                         onClick = { isCreatingANewPlaylist = true }
+                    )
+
+                    SecondaryTextButton(
+                        text = "Import M3U",
+                        onClick = {
+                            try { importLauncher.launch(arrayOf("audio/x-mpegurl", "application/octet-stream", "text/plain")) }
+                            catch (_: Exception) { context.toast("Couldn't open a playlist file") }
+                        }
                     )
 
                     Spacer(

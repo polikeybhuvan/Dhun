@@ -4,6 +4,11 @@ plugins {
     kotlin("kapt")
 }
 
+val releaseStoreFile = providers.gradleProperty("DHUN_RELEASE_STORE_FILE").orNull
+val releaseStorePassword = providers.gradleProperty("DHUN_RELEASE_STORE_PASSWORD").orNull
+val releaseKeyAlias = providers.gradleProperty("DHUN_RELEASE_KEY_ALIAS").orNull
+val releaseKeyPassword = providers.gradleProperty("DHUN_RELEASE_KEY_PASSWORD").orNull
+
 android {
     compileSdk = 33
 
@@ -34,7 +39,14 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             manifestPlaceholders["appName"] = "Dhun"
-            signingConfig = signingConfigs.getByName("debug")
+            if (releaseStoreFile != null && releaseStorePassword != null && releaseKeyAlias != null && releaseKeyPassword != null) {
+                signingConfig = signingConfigs.create("production") {
+                    storeFile = file(releaseStoreFile)
+                    storePassword = releaseStorePassword
+                    keyAlias = releaseKeyAlias
+                    keyPassword = releaseKeyPassword
+                }
+            }
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
@@ -45,6 +57,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     compileOptions {

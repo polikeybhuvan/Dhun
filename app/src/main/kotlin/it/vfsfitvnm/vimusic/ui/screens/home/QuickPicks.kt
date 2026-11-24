@@ -97,7 +97,6 @@ import it.vfsfitvnm.vimusic.utils.forcePlayAtIndex
 import it.vfsfitvnm.vimusic.utils.secondary
 import it.vfsfitvnm.vimusic.utils.semiBold
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -117,6 +116,7 @@ fun QuickPicks(
 
     var relatedPageResult by persist<Result<Innertube.RelatedPage?>?>(tag = "home/relatedPageResult")
     var recentSongs by persistList<Song>("home/quickPicks/recentSongs")
+    var favoriteSong by persist<Song?>("home/quickPicks/favoriteSong")
     var isRefreshing by remember { mutableStateOf(false) }
     var refreshKey by remember { mutableStateOf(0) }
 
@@ -124,26 +124,33 @@ fun QuickPicks(
         Database.recentlyPlayed().distinctUntilChanged().collect { recentSongs = it }
     }
 
-    LaunchedEffect(refreshKey) {
-        if (refreshKey > 0) {
-            isRefreshing = true
-            val result = withContext(Dispatchers.IO) {
-                Innertube.relatedPage(NextBody(videoId = trending?.id ?: "J7p4bzqLvCw"))
+    LaunchedEffect(Unit) {
+        Database.favorites().distinctUntilChanged().collect { favoriteSong = it.firstOrNull() }
+    }
+
+    val recommendationSeed = trending ?: recentSongs.firstOrNull() ?: favoriteSong
+    val recommendationSource = when {
+        trending != null -> "your most-played song"
+        recentSongs.isNotEmpty() -> "your recent listening"
+        favoriteSong != null -> "your favorites"
+        else -> "popular music"
+    }
+
+    LaunchedEffect(recommendationSeed?.id, refreshKey) {
+        isRefreshing = true
+        try {
+            relatedPageResult = withContext(Dispatchers.IO) {
+                Innertube.relatedPage(
+                    NextBody(videoId = recommendationSeed?.id ?: "J7p4bzqLvCw")
+                )
             }
-            relatedPageResult = result
-            recentSongs = Database.recentlyPlayed().first()
+        } finally {
             isRefreshing = false
         }
     }
 
     LaunchedEffect(Unit) {
-        Database.trending().distinctUntilChanged().collect { song ->
-            if (relatedPageResult == null || trending?.id != song?.id) {
-                relatedPageResult =
-                    Innertube.relatedPage(NextBody(videoId = (song?.id ?: "J7p4bzqLvCw")))
-            }
-            trending = song
-        }
+        Database.trending().distinctUntilChanged().collect { trending = it }
     }
 
     val songThumbnailSizeDp = Dimensions.thumbnails.song
@@ -227,6 +234,14 @@ fun QuickPicks(
                     .padding(endPaddingValues)
             )
 
+            BasicText(
+                text = "Picked from $recommendationSource",
+                style = typography.xs.secondary,
+                modifier = Modifier
+                    .padding(horizontal = 16.dp)
+                    .padding(bottom = 8.dp)
+            )
+
             if (isRefreshing || pullDistance.value > 0f) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -265,7 +280,7 @@ fun QuickPicks(
                         .fillMaxWidth()
                         .height((songThumbnailSizeDp + Dimensions.itemsVerticalPadding * 2) * 4)
                 ) {
-                    trending?.let { song ->
+                    recommendationSeed?.let { song ->
                         item {
                             SongItem(
                                 song = song,
@@ -303,7 +318,7 @@ fun QuickPicks(
                     }
 
                     items(
-                        items = related.songs?.dropLast(if (trending == null) 0 else 1)
+                        items = related.songs?.dropLast(if (recommendationSeed == null) 0 else 1)
                             ?: emptyList(),
                         key = Innertube.SongItem::key
                     ) { song ->
@@ -338,7 +353,7 @@ fun QuickPicks(
                 }
 
                 val quickPickPageCount = (
-                    maxOf(related.songs?.size ?: 0, if (trending != null) 1 else 0) + 3
+                    maxOf(related.songs?.size ?: 0, if (recommendationSeed != null) 1 else 0) + 3
                 ) / 4
                 if (quickPickPageCount > 1) {
                     ColumnPageDots(
@@ -438,13 +453,24 @@ fun QuickPicks(
 
                 Unit
             } ?: relatedPageResult?.exceptionOrNull()?.let {
-                BasicText(
-                    text = "Quick picks are unavailable right now. Try again later.",
-                    style = typography.s.secondary.center,
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier
                         .align(Alignment.CenterHorizontally)
                         .padding(all = 16.dp)
-                )
+                ) {
+                    BasicText(
+                        text = "Quick picks are unavailable right now.",
+                        style = typography.s.secondary.center
+                    )
+                    BasicText(
+                        text = "Try again",
+                        style = typography.s.semiBold.copy(color = colorPalette.accent),
+                        modifier = Modifier
+                            .clickable(enabled = !isRefreshing) { refreshKey++ }
+                            .padding(12.dp)
+                    )
+                }
             } ?: if (relatedPageResult == null) ShimmerHost {
                 repeat(4) {
                     SongItemPlaceholder(
