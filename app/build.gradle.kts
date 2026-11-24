@@ -32,7 +32,7 @@ android {
     buildTypes {
         debug {
             applicationIdSuffix = ".debug"
-            manifestPlaceholders["appName"] = "Dhun Debug"
+            manifestPlaceholders["appName"] = "Dhun"
         }
 
         release {
