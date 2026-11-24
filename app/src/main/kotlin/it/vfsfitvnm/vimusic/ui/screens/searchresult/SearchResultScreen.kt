@@ -119,7 +119,11 @@ fun SearchResultScreen(query: String, onSearchAgain: () -> Unit) {
                 onTabChanged = onTabIndexChanges,
                 tabColumnContent = { Item ->
                     Item(0, "Songs", R.drawable.musical_notes)
+                    Item(1, "Albums", R.drawable.disc)
                     Item(2, "Artists", R.drawable.person)
+                    Item(3, "Videos", R.drawable.film)
+                    Item(4, "Playlists", R.drawable.playlist)
+                    Item(5, "Featured", R.drawable.sparkles)
                 }
             ) { tabIndex ->
                 saveableStateHolder.SaveableStateProvider(tabIndex) {

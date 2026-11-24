@@ -35,6 +35,7 @@ import it.vfsfitvnm.vimusic.utils.intent
 import it.vfsfitvnm.vimusic.utils.toast
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import kotlin.system.exitProcess
@@ -72,18 +73,72 @@ fun DatabaseSettings() {
             if (uri == null) return@rememberLauncherForActivityResult
 
             query {
-                Database.checkpoint()
-                Database.internal.close()
-
-                context.applicationContext.contentResolver.openInputStream(uri)
-                    ?.use { inputStream ->
-                        FileOutputStream(Database.internal.path).use { outputStream ->
-                            inputStream.copyTo(outputStream)
+                var temporaryFile: File? = null
+                var recoveryFile: File? = null
+                var databaseWasClosed = false
+                try {
+                    val databaseFile = File(requireNotNull(Database.internal.path))
+                    val databaseDirectory = requireNotNull(databaseFile.parentFile)
+                    temporaryFile = File(databaseDirectory, "restore-${System.currentTimeMillis()}.tmp")
+                    val previousFile = File(databaseDirectory, "restore-previous.tmp")
+                    recoveryFile = previousFile
+                    val candidateFile = requireNotNull(temporaryFile)
+                    val input = context.applicationContext.contentResolver.openInputStream(uri)
+                        ?: error("Unable to read backup")
+                    input.use { source ->
+                        FileOutputStream(candidateFile).use { destination ->
+                            val buffer = ByteArray(8192)
+                            var total = 0L
+                            while (true) {
+                                val read = source.read(buffer)
+                                if (read < 0) break
+                                total += read
+                                require(total <= 128L * 1024 * 1024) { "Backup is larger than 128 MB" }
+                                destination.write(buffer, 0, read)
+                            }
                         }
                     }
 
-                context.stopService(context.intent<PlayerService>())
-                exitProcess(0)
+                    val candidate = android.database.sqlite.SQLiteDatabase.openDatabase(
+                        candidateFile.absolutePath,
+                        null,
+                        android.database.sqlite.SQLiteDatabase.OPEN_READONLY
+                    )
+                    candidate.use { sqlite ->
+                        val integrity = sqlite.rawQuery("PRAGMA integrity_check", null).use { cursor ->
+                            if (cursor.moveToFirst()) cursor.getString(0) else ""
+                        }
+                        require(integrity == "ok") { "Backup database failed its integrity check" }
+                        val requiredTables = listOf("room_master_table", "Song", "Playlist", "SongPlaylistMap")
+                        val existingTables = sqlite.rawQuery(
+                            "SELECT name FROM sqlite_master WHERE type='table'",
+                            null
+                        ).use { cursor -> buildSet { while (cursor.moveToNext()) add(cursor.getString(0)) } }
+                        require(existingTables.containsAll(requiredTables)) { "This file is not a Dhun database backup" }
+                    }
+
+                    context.stopService(context.intent<PlayerService>())
+                    Database.checkpoint()
+                    Database.internal.close()
+                    databaseWasClosed = true
+                    if (previousFile.exists()) previousFile.delete()
+                    require(databaseFile.renameTo(previousFile)) { "Couldn't preserve the current database" }
+                    if (!candidateFile.renameTo(databaseFile)) {
+                        previousFile.renameTo(databaseFile)
+                        error("Couldn't install the restored database")
+                    }
+                    previousFile.delete()
+                    exitProcess(0)
+                } catch (error: Throwable) {
+                    temporaryFile?.delete()
+                    if (databaseWasClosed) {
+                        val liveDatabase = File(requireNotNull(Database.internal.path))
+                        if (!liveDatabase.exists()) recoveryFile?.renameTo(liveDatabase)
+                        exitProcess(0)
+                    }
+                    val message = "Restore failed: ${error.message ?: "invalid backup"}"
+                    android.os.Handler(android.os.Looper.getMainLooper()).post { context.toast(message) }
+                }
             }
         }
 

@@ -19,7 +19,7 @@ dependencies {
     implementation(libs.ktor.client.serialization)
     implementation(libs.ktor.serialization.json)
 
-    implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.27.1")
+    implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.26.5")
     implementation("org.mozilla:rhino:1.8.1")
 
     testImplementation(testLibs.junit)

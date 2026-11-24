@@ -983,9 +983,8 @@ class PlayerService : Service(), Player.Listener, PlaybackStatsListener.Callback
                     .build()
 
                 notificationManager?.notify(SleepTimerNotificationId, notification)
-
-                stopSelf()
-                exitProcess(0)
+                player.pause()
+                timerJob = null
             }
         }
 

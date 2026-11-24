@@ -135,6 +135,9 @@ interface Database {
     @Query("SELECT * FROM Song WHERE id = :id")
     fun song(id: String): Flow<Song?>
 
+    @Query("SELECT * FROM Song WHERE id = :id LIMIT 1")
+    fun songOnce(id: String): Song?
+
     @Query("SELECT likedAt FROM Song WHERE id = :songId")
     fun likedAt(songId: String): Flow<Long?>
 
